@@ -1,2 +1,50 @@
+# Local IdP metadata (contains sensitive certs)
 conf/idp-metadata.xml
-conf/__pycache__/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtualenv
+venv/
+.venv/
+
+# Environment files (may contain secrets)
+.env
+.env.*
+.env.local
+
+# Pytest cache
+.pytest_cache/
+
+# Coverage reports
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Logs
+*.log
+server.log
+nohup.out
+
+# Editor directories and files
+.vscode/
+.idea/
+*.sublime-workspace
+*.swp
+
+# macOS
+.DS_Store
+
+# Misc
+.python-version
+
+# Keep packaged sample files in repo (e.g. sample_idp-metadata.xml)
