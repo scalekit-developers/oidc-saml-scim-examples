@@ -3,9 +3,34 @@ from markupsafe import escape
 from saml2 import entity
 from saml2.client import Saml2Client
 from saml2.config import Config as Saml2Config
-from conf.sp_conf import CONFIG, BASE_URL
+from conf.sp_conf import CONFIG, BASE_URL, METADATA_LOCAL, METADATA_URL
 from xml.etree import ElementTree
 from saml2 import BINDING_HTTP_POST, BINDING_HTTP_REDIRECT
+
+try:
+    from saml2.response import (
+        SignatureError,
+        ResponseLifetimeError,
+        IncorrectlySigned,
+    )
+except Exception:
+    # Older/newer pysaml2 may not expose ResponseLifetimeError; provide a
+    # harmless placeholder so the except block below can be present.
+    from saml2.response import (
+        SignatureError,
+        IncorrectlySigned,
+    )
+
+    class ResponseLifetimeError(Exception):
+        pass
+try:
+    from saml2.validate import AudienceError
+except Exception:
+    # Some pysaml2 versions don't expose AudienceError; provide a
+    # lightweight fallback so exception handling below still works.
+    class AudienceError(Exception):
+        pass
+
 from pprint import pprint
 from saml2.saml import NAMEID_FORMAT_PERSISTENT, NameID
 from saml2.metadata import entity_descriptor
@@ -13,6 +38,7 @@ from flask import render_template
 import os
 import base64
 import argparse
+from datetime import datetime
 
 # Define the argument parser and parse arguments
 parser = argparse.ArgumentParser(description='Sample SaaS App')
@@ -135,29 +161,36 @@ def acs():
     client = saml_client_for(CONFIG)
     try:
         # Parse the SAML Response
-
         saml_response = request.form.get('SAMLResponse')
         authn_response = client.parse_authn_request_response(saml_response, entity.BINDING_HTTP_POST)
 
+        if authn_response is None:
+            debug_log("parse_authn_request_response returned None")
+            session.clear()
+            return "Invalid SAML response", 400
+
         debug_log(f"authn_response.status_ok(): {authn_response.status_ok()}")
+
         # Extract the user's NameID and attributes
         name_id = authn_response.assertion.subject.name_id.text
         debug_log(f"name_id: {name_id}")
 
         # Accessing attributes directly from the assertion
         attributes = {}
-        for statement in authn_response.assertion.attribute_statement:
-            for attribute in statement.attribute:
+        for statement in getattr(authn_response.assertion, 'attribute_statement', []):
+            for attribute in getattr(statement, 'attribute', []):
                 # Assuming single value attributes for simplicity
-                attributes[attribute.name] = attribute.attribute_value[0].text
+                try:
+                    attributes[attribute.name] = attribute.attribute_value[0].text
+                except Exception:
+                    # Skip malformed attributes
+                    continue
 
-
-         # Convert authn_response object to string
+        # Convert authn_response object to string
         authn_response_string = str(authn_response)
 
         # Store authn_response string in session
         session['authn_response_string'] = authn_response_string
-
 
         # Set the user session
         session['name_id'] = name_id
@@ -165,18 +198,36 @@ def acs():
         session['lastname'] = attributes.get('lastname', None)
         session['is_authenticated'] = True
         session['email'] = attributes.get('email', None)
-        session['profileUrl']= attributes.get('profileUrl',None)
+        session['profileUrl'] = attributes.get('profileUrl', None)
         session['attributes'] = attributes
 
         return redirect(url_for('hello'))
 
+    except SignatureError:
+        debug_log("Signature validation failed.")
+        session.clear()
+        return "Invalid or tampered signature", 403
+
+    except AudienceError:
+        debug_log("Audience mismatch. Check SP entityID.")
+        session.clear()
+        return "Audience restriction failed", 403
+
+    except ResponseLifetimeError:
+        debug_log("SAML assertion expired or not yet valid.")
+        session.clear()
+        return "Expired assertion", 403
+
+    except IncorrectlySigned:
+        debug_log("Incorrectly signed response.")
+        session.clear()
+        return "Invalid signature format", 403
+
     except Exception as e:
         # Log the exception for debugging
         debug_log(f"SAML ACS Error: {e}")
-
-        # Clear any existing session and display error
         session.clear()
-        return f"EXCEPTION {e}", 403
+        return f"EXCEPTION {e}", 500
 
 @app.route('/logout')
 def logout():
@@ -203,5 +254,40 @@ def metadata():
     return response
 
 if __name__ == "__main__":
-    app.run(debug=False, host='0.0.0.0', port=8443)
+    # Determine port from env or default
+    port = int(os.environ.get('PORT', '8443'))
+
+    # Auto-fetch remote metadata if configured and local file missing
+    try:
+        if METADATA_URL and not os.path.exists(METADATA_LOCAL):
+            try:
+                # Use stdlib to avoid external dependency on `requests`
+                from urllib.request import urlopen, Request
+                from urllib.error import URLError, HTTPError
+
+                print(f"Fetching metadata from: {METADATA_URL}")
+                req = Request(METADATA_URL, headers={"User-Agent": "metadata-fetcher/1.0"})
+                with urlopen(req, timeout=20) as resp:
+                    content = resp.read().decode("utf-8")
+
+                if ('<EntityDescriptor' not in content) and ('<md:EntityDescriptor' not in content):
+                    print('Warning: fetched metadata does not contain EntityDescriptor')
+
+                os.makedirs(os.path.dirname(METADATA_LOCAL), exist_ok=True)
+                # optional backup
+                if os.path.exists(METADATA_LOCAL):
+                    ts = datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
+                    os.rename(METADATA_LOCAL, f"{METADATA_LOCAL}.{ts}.bak")
+                with open(METADATA_LOCAL, 'w', encoding='utf-8') as fh:
+                    fh.write(content)
+                print(f"Saved fetched metadata to: {METADATA_LOCAL}")
+            except (HTTPError, URLError) as e:
+                print(f'HTTP error fetching metadata from {METADATA_URL}: {e}')
+            except Exception as e:
+                print(f'Failed to fetch metadata from {METADATA_URL}: {e}')
+    except Exception:
+        # swallow any metadata-fetch startup errors to allow debugging
+        pass
+
+    app.run(debug=False, host='0.0.0.0', port=port)
 
