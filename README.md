@@ -14,7 +14,7 @@
 [![SAML](https://img.shields.io/badge/SAML-2.0-green?style=flat-square)](https://saml.xml.org/)
 [![OIDC](https://img.shields.io/badge/OIDC-1.0-blue?style=flat-square)](https://openid.net/connect/)
 
-Comprehensive examples demonstrating <a href="https://scalekit.com" target="_blank" rel="noopener noreferrer">Scalekit</a>'s **auth stack for AI apps** with various identity providers and protocols. Learn how to implement enterprise authentication flows including OIDC, SAML, and SCIM provisioning.
+Comprehensive examples demonstrating <a href="https://scalekit.com" target="_blank" rel="noopener noreferrer">Scalekit</a> with various identity providers and protocols. Scalekit provides auth and actions on behalf of users, with 500+ connectors and 20,000+ tools. Learn how to implement enterprise authentication flows including OIDC, SAML, and SCIM provisioning.
 
 ## 🔐 Authentication Examples
 
